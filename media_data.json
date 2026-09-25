@@ -1,0 +1,47 @@
+{
+  "unfinished_series": [
+    {
+      "id": "ser-severance",
+      "title": "Severance",
+      "current_season": 2,
+      "current_episode": 1,
+      "platform": "Apple TV+",
+      "status": "watching",
+      "notes": "Czeka na weekend",
+      "updated_at": "2026-09-25T14:00:00"
+    },
+    {
+      "id": "ser-silo",
+      "title": "Silo",
+      "current_season": 2,
+      "current_episode": 4,
+      "platform": "Apple TV+",
+      "status": "watching",
+      "notes": "Dobre tempo",
+      "updated_at": "2026-09-25T14:00:00"
+    }
+  ],
+  "watched_movies": [
+    {
+      "id": "mov-inception",
+      "title": "Inception",
+      "watched_date": "2026-09-20",
+      "rating": "9/10",
+      "comment": "Klasyk na wieczór",
+      "added_at": "2026-09-20T21:00:00"
+    }
+  ],
+  "finished_series": [
+    {
+      "id": "ser-ted-lasso",
+      "title": "Ted Lasso",
+      "finished_date": "2026-08-15",
+      "rating": "10/10",
+      "platform": "Apple TV+"
+    }
+  ],
+  "metadata": {
+    "version": "1.0",
+    "description": "Zewnętrzna pamięć Dori do filmów i seriali (żeby nie uciekło z jej 3-sekundowego RAM-u)"
+  }
+}
