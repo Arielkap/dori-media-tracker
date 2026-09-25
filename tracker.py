@@ -435,12 +435,12 @@ def build_monday_prompt() -> str:
         for rm in recent[:5]:
             rate = f" ({rm.get('rating')})" if rm.get("rating") else ""
             lines.append(f"• <b>{rm['title']}</b> [{rm.get('watched_date')}]{rate}\n")
-        lines.append("\nOglądałeś w minionym tygodniu coś jeszcze, czego nie ma na Trakcie?")
+        lines.append("\nOglądałeś w minionym tygodniu coś poza Prime (np. na Apple TV+, Netflixie czy w kinie)?")
         return "".join(lines)
     else:
         return (
             "🐟 <b>Dori: Poniedziałkowy meldunek filmowy</b> 🎬\n\n"
-            "Ariel, co tam wpadło na ekran przez weekend lub w minionym tygodniu?\n"
+            "Na Prime Video czysto. Wpadło w minionym tygodniu coś na Apple TV+, Netflixie lub w kinie?\n"
             "Rzuć tytuł i ocenę, a od razu ląduje w notesie."
         )
 
