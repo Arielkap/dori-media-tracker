@@ -40,7 +40,11 @@ python3 tracker.py quick "film: Diuna 2 9/10"
 python3 tracker.py quick "serial: Silo s02e05"
 python3 tracker.py quick "skończyłem serial Severance 10/10"
 
-# 6. Ręczne wywołanie powiadomień na Telegram
+# 6. Automatyczna synchronizacja z Trakt.tv (Zero LLM Tokens)
+python3 tracker.py sync-trakt
+python3 tracker.py sync-trakt --limit 100
+
+# 7. Ręczne wywołanie powiadomień na Telegram (z auto-synciem Trakt)
 python3 tracker.py monday-check --send
 python3 tracker.py friday-reminder --send
 ```

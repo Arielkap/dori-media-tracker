@@ -13,10 +13,37 @@ import sys
 import json
 import re
 import argparse
+import urllib.request
+import urllib.error
 from datetime import datetime, date
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.path.join(BASE_DIR, "media_data.json")
+
+ENV_PATHS = [
+    os.path.join(BASE_DIR, ".env"),
+    "/docker/hermes-agent-umxh/data/.env",
+    "/opt/data/.env",
+    os.path.expanduser("~/.env")
+]
+
+def get_env_var(key: str, default: str = "") -> str:
+    val = os.environ.get(key)
+    if val:
+        return val.strip("\"' ")
+    for path in ENV_PATHS:
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line.startswith(f"{key}="):
+                            v = line.split("=", 1)[1].strip("\"' ")
+                            if v:
+                                return v
+            except Exception:
+                pass
+    return default
 
 # Import telegram alert sender
 try:
@@ -59,6 +86,10 @@ def save_data(data: dict):
 def slugify(text: str) -> str:
     cleaned = re.sub(r"[^\w\s-]", "", text.lower()).strip()
     return re.sub(r"[-\s]+", "-", cleaned)
+
+
+def normalize_title(text: str) -> str:
+    return re.sub(r"[\W_]+", "", text.lower())
 
 
 # --- Media Operations ---
@@ -194,20 +225,233 @@ def drop_series(title: str) -> bool:
         return False
 
 
+# --- Trakt.tv Synchronization (Zero LLM Tokens) ---
+
+def sync_trakt(username: str = None, client_id: str = None, limit: int = 50, sync_episodes: bool = True) -> dict:
+    user = username or get_env_var("TRAKT_USERNAME", "Ariello")
+    cid = client_id or get_env_var("TRAKT_CLIENT_ID")
+
+    if not cid:
+        print("[ERROR] Brak TRAKT_CLIENT_ID w zmiennych środowiskowych ani w plikach .env.", file=sys.stderr)
+        return {"error": "Missing TRAKT_CLIENT_ID"}
+
+    headers = {
+        "Content-Type": "application/json",
+        "trakt-api-version": "2",
+        "trakt-api-key": cid,
+        "User-Agent": "DoriMediaTracker/1.0"
+    }
+
+    print(f"🐟 [DORI] Łączę się z Trakt.tv dla profilu: '{user}'...")
+
+    # 1. Pobieramy oceny filmów użytkownika (enrichment)
+    ratings_map = {}
+    try:
+        req_ratings = urllib.request.Request(
+            f"https://api.trakt.tv/users/{user}/ratings/movies",
+            headers=headers
+        )
+        with urllib.request.urlopen(req_ratings, timeout=15) as resp:
+            ratings_data = json.loads(resp.read().decode("utf-8"))
+            for r in ratings_data:
+                m = r.get("movie", {})
+                trakt_id = m.get("ids", {}).get("trakt")
+                if trakt_id:
+                    ratings_map[str(trakt_id)] = r.get("rating")
+                if m.get("title"):
+                    ratings_map[m.get("title").strip().lower()] = r.get("rating")
+    except Exception as e:
+        print(f"[WARN] Nie udało się pobrać ocen z Trakt: {e}", file=sys.stderr)
+
+    data = load_data()
+    watched_movies = data.setdefault("watched_movies", [])
+    unfinished_series = data.setdefault("unfinished_series", [])
+    finished_series = data.setdefault("finished_series", [])
+
+    existing_history_ids = {str(m.get("trakt_history_id")) for m in watched_movies if m.get("trakt_history_id")}
+    existing_movie_keys = {(m.get("title", "").strip().lower(), m.get("watched_date", "")) for m in watched_movies}
+
+    # 2. Pobieramy historię obejrzanych filmów
+    movies_added = 0
+    try:
+        req_movies = urllib.request.Request(
+            f"https://api.trakt.tv/users/{user}/history/movies?limit={limit}",
+            headers=headers
+        )
+        with urllib.request.urlopen(req_movies, timeout=20) as resp:
+            movies_data = json.loads(resp.read().decode("utf-8"))
+            for item in movies_data:
+                hist_id = str(item.get("id"))
+                m_info = item.get("movie", {})
+                title = m_info.get("title", "").strip()
+                year = m_info.get("year")
+                watched_at_raw = item.get("watched_at", "")
+                watched_date = watched_at_raw[:10] if watched_at_raw else date.today().isoformat()
+                trakt_movie_id = str(m_info.get("ids", {}).get("trakt", ""))
+
+                if hist_id in existing_history_ids:
+                    continue
+                if (title.lower(), watched_date) in existing_movie_keys:
+                    continue
+
+                rating_val = ratings_map.get(trakt_movie_id) or ratings_map.get(title.lower())
+                rating_str = f"{rating_val}/10" if rating_val else ""
+
+                entry = {
+                    "id": f"mov-{slugify(title)}-{hist_id}",
+                    "title": title,
+                    "year": year,
+                    "watched_date": watched_date,
+                    "rating": rating_str,
+                    "comment": "Trakt.tv",
+                    "trakt_history_id": item.get("id"),
+                    "trakt_id": m_info.get("ids", {}).get("trakt"),
+                    "added_at": datetime.now().isoformat()
+                }
+                watched_movies.append(entry)
+                existing_history_ids.add(hist_id)
+                existing_movie_keys.add((title.lower(), watched_date))
+                movies_added += 1
+                print(f"🎬 [DORI] Zaimportowano z Trakt: '{title}' ({year or 'brak roku'}) - {watched_date}{f' (Ocena: {rating_str})' if rating_str else ''}")
+
+    except Exception as e:
+        print(f"[ERROR] Błąd synchronizacji filmów z Trakt: {e}", file=sys.stderr)
+
+    # Sortujemy filmy malejąco po dacie obejrzenia
+    watched_movies.sort(key=lambda x: x.get("watched_date", ""), reverse=True)
+
+    # 3. Pobieramy historię odcinków seriali
+    episodes_updated = 0
+    episodes_added = 0
+    if sync_episodes:
+        try:
+            req_episodes = urllib.request.Request(
+                f"https://api.trakt.tv/users/{user}/history/episodes?limit=50",
+                headers=headers
+            )
+            with urllib.request.urlopen(req_episodes, timeout=20) as resp:
+                episodes_data = json.loads(resp.read().decode("utf-8"))
+                show_latest = {}
+                for ep_item in episodes_data:
+                    show_title = ep_item.get("show", {}).get("title", "").strip()
+                    ep_info = ep_item.get("episode", {})
+                    s_num = ep_info.get("season", 1)
+                    e_num = ep_info.get("number", 1)
+                    watched_at = ep_item.get("watched_at", "")[:10]
+
+                    if not show_title:
+                        continue
+
+                    key = show_title.lower()
+                    if key not in show_latest:
+                        show_latest[key] = {
+                            "title": show_title,
+                            "season": s_num,
+                            "episode": e_num,
+                            "watched_date": watched_at
+                        }
+                    else:
+                        prev = show_latest[key]
+                        if (s_num, e_num) > (prev["season"], prev["episode"]):
+                            prev["season"] = s_num
+                            prev["episode"] = e_num
+                            prev["watched_date"] = watched_at
+
+                for s_key, s_data in show_latest.items():
+                    matched = False
+                    norm_s_key = normalize_title(s_data["title"])
+                    for existing in unfinished_series:
+                        if norm_s_key == normalize_title(existing.get("title", "")):
+                            matched = True
+                            cur_s = existing.get("current_season", 1)
+                            cur_e = existing.get("current_episode", 1)
+                            if (s_data["season"], s_data["episode"]) > (cur_s, cur_e):
+                                existing["current_season"] = s_data["season"]
+                                existing["current_episode"] = s_data["episode"]
+                                existing["updated_at"] = datetime.now().isoformat()
+                                episodes_updated += 1
+                                print(f"📺 [DORI] Zaktualizowano postęp '{existing['title']}': S{cur_s:02d}E{cur_e:02d} ➔ S{s_data['season']:02d}E{s_data['episode']:02d}")
+                            break
+
+                    is_finished = any(norm_s_key == normalize_title(fs.get("title", "")) for fs in finished_series)
+                    if not matched and not is_finished:
+                        new_s_entry = {
+                            "id": f"ser-{slugify(s_data['title'])}",
+                            "title": s_data["title"],
+                            "current_season": s_data["season"],
+                            "current_episode": s_data["episode"],
+                            "platform": "",
+                            "status": "watching",
+                            "notes": "Trakt.tv",
+                            "updated_at": datetime.now().isoformat()
+                        }
+                        unfinished_series.append(new_s_entry)
+                        episodes_added += 1
+                        print(f"📺 [DORI] Dodano nowy serial z Trakt: '{s_data['title']}' (S{s_data['season']:02d}E{s_data['episode']:02d})")
+
+        except Exception as e:
+            print(f"[WARN] Błąd synchronizacji seriali z Trakt: {e}", file=sys.stderr)
+
+    save_data(data)
+    summary = {
+        "movies_added": movies_added,
+        "episodes_updated": episodes_updated,
+        "episodes_added": episodes_added
+    }
+    print(f"✅ [DORI] Synchronizacja z Trakt zakończona! Dodano filmów: {movies_added}, zaktualizowano seriali: {episodes_updated}, dodano seriali: {episodes_added}.")
+    return summary
+
+
 # --- Automated Prompts (Monday / Friday) ---
 
 def build_monday_prompt() -> str:
-    """Builds Monday question about watched movies."""
-    msg = (
-        "🐟 <b>Dori: Poniedziałkowy meldunek filmowy</b> 🎬\n\n"
-        "Ariel, co tam wpadło na ekran przez weekend lub w minionym tygodniu?\n"
-        "Rzuć tytuł i ocenę, a od razu ląduje w notesie."
-    )
-    return msg
+    """Builds Monday question about watched movies, syncing with Trakt first if configured."""
+    try:
+        sync_trakt(limit=20, sync_episodes=False)
+    except Exception:
+        pass
+
+    data = load_data()
+    movies = data.get("watched_movies", [])
+
+    # Ostatnie filmy z ostatnich 7 dni
+    recent = []
+    today = date.today()
+    for m in movies:
+        w_date_str = m.get("watched_date")
+        if w_date_str:
+            try:
+                w_d = datetime.strptime(w_date_str, "%Y-%m-%d").date()
+                if (today - w_d).days <= 7:
+                    recent.append(m)
+            except Exception:
+                pass
+
+    if recent:
+        lines = [
+            "🐟 <b>Dori: Poniedziałkowy meldunek filmowy</b> 🎬\n\n",
+            "Zsynchronizowałam Twoje ostatnie seanse z Trakt.tv:\n\n"
+        ]
+        for rm in recent[:5]:
+            rate = f" ({rm.get('rating')})" if rm.get("rating") else ""
+            lines.append(f"• <b>{rm['title']}</b> [{rm.get('watched_date')}]{rate}\n")
+        lines.append("\nOglądałeś w minionym tygodniu coś jeszcze, czego nie ma na Trakcie?")
+        return "".join(lines)
+    else:
+        return (
+            "🐟 <b>Dori: Poniedziałkowy meldunek filmowy</b> 🎬\n\n"
+            "Ariel, co tam wpadło na ekran przez weekend lub w minionym tygodniu?\n"
+            "Rzuć tytuł i ocenę, a od razu ląduje w notesie."
+        )
 
 
 def build_friday_reminder() -> str:
     """Builds Friday reminder with current unfinished TV series."""
+    try:
+        sync_trakt(limit=10, sync_episodes=True)
+    except Exception:
+        pass
+
     data = load_data()
     series = [s for s in data.get("unfinished_series", []) if s.get("status") != "dropped"]
 
@@ -241,6 +485,11 @@ def run_quick_add(text: str) -> bool:
     Handles both compact notation (S01E05) and natural Polish phrasing.
     """
     text_clean = text.strip()
+
+    # Check Trakt sync request
+    if any(k in text_clean.lower() for k in ["sync trakt", "synchronizuj trakt", "pobierz z trakt", "zsynchronizuj", "zaciągnij z trakt", "pobierz filmy"]):
+        sync_trakt()
+        return True
 
     # Check finished / dropped
     if any(k in text_clean.lower() for k in ["skończyłem", "zaliczony", "obejrzany cały", "koniec serialu", "zakończyłem", "porzuciłem", "nie dla mnie"]):
@@ -354,6 +603,12 @@ def main():
     p_fr = subparsers.add_parser("friday-reminder", help="Wygeneruj lub wyślij piątkowe przypomnienie o serialach")
     p_fr.add_argument("--send", action="store_true", help="Wyślij na Telegram")
 
+    # sync-trakt
+    p_st = subparsers.add_parser("sync-trakt", help="Zsynchronizuj filmy i seriale z Trakt.tv")
+    p_st.add_argument("--user", "-u", default=None, help="Nazwa użytkownika Trakt (domyślnie z .env)")
+    p_st.add_argument("--limit", "-l", type=int, default=50, help="Liczba ostatnich filmów do pobrania")
+    p_st.add_argument("--no-episodes", action="store_true", help="Nie synchronizuj seriali")
+
     # quick
     p_qk = subparsers.add_parser("quick", help="Szybkie dodawanie z tekstu naturalnego")
     p_qk.add_argument("text", help="Tekst w stylu 'film: Diuna 2 9/10' lub 'Silo s02e05'")
@@ -409,6 +664,9 @@ def main():
 
     elif args.command == "drop-series":
         drop_series(title=args.title)
+
+    elif args.command == "sync-trakt":
+        sync_trakt(username=args.user, limit=args.limit, sync_episodes=not args.no_episodes)
 
     elif args.command == "monday-check":
         msg = build_monday_prompt()
