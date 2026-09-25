@@ -19,6 +19,16 @@
       "status": "watching",
       "notes": "Końcówka sezonu 1, czeka na sezon 2",
       "updated_at": "2026-09-25T17:15:00"
+    },
+    {
+      "id": "ser-ted-lasso",
+      "title": "Ted Lasso",
+      "current_season": 3,
+      "current_episode": 1,
+      "platform": "Apple TV+",
+      "status": "watching",
+      "notes": "Końcówka ostatniego sezonu",
+      "updated_at": "2026-09-25T19:39:08.078742"
     }
   ],
   "watched_movies": [],
