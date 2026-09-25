@@ -199,13 +199,9 @@ def drop_series(title: str) -> bool:
 def build_monday_prompt() -> str:
     """Builds Monday question about watched movies."""
     msg = (
-        "🐟 <b>Dori pyta: Poniedziałkowy raport filmowy!</b> 🎬\n"
-        "<i>(Mando założył mi obrożę z crona, żebym znowu nie odpłynęła w stronę zamków z piasku...)</i>\n\n"
-        "Ariel, co dobrego (lub tragicznego) obejrzałeś w minionym tygodniu / przez weekend? 🍿\n\n"
-        "Odpisz mi prosto na czacie, a ja wrzucę to do notesu:\n"
-        "• <code>Film: Tytuł, ocena 8/10, krótki komentarz</code>\n"
-        "• <code>Nic nie oglądałem, zbieram siły</code>\n\n"
-        "<i>Pamięć rybki: 3 sekundy. Twój notes: wieczny.</i>"
+        "🐟 <b>Dori: Poniedziałkowy meldunek filmowy</b> 🎬\n\n"
+        "Ariel, co tam wpadło na ekran przez weekend lub w minionym tygodniu?\n"
+        "Rzuć tytuł i ocenę, a od razu ląduje w notesie."
     )
     return msg
 
@@ -217,51 +213,38 @@ def build_friday_reminder() -> str:
 
     if not series:
         msg = (
-            "🐟 <b>Dori melduje: Piątkowy rozkład jazdy!</b> 📺\n"
-            "<i>(Nawet ja pamiętam, że dziś piątek — chociaż zamek z piasku kusił...)</i>\n\n"
-            "🎉 <b>Czyste konto!</b> Nie masz obecnie żadnych rozgrzebanych seriali w notesie.\n"
-            "Planujesz coś zacząć w ten weekend? Odpisz mi tytuł, np.:\n"
-            "• <code>Zaczynam: Severance s02e01 (Apple TV+)</code>\n"
+            "🐟 <b>Dori: Piątkowy rozkład serialowy</b> 📺\n\n"
+            "Czyste konto — nie masz obecnie rozgrzebanych seriali w notesie.\n"
+            "Zaczynasz coś w ten weekend?"
         )
         return msg
 
     msg_lines = [
-        "🐟 <b>Dori przypomina: Piątkowy rozkład serialowy!</b> 📺\n",
-        "<i>(Żebyś nie szukał po omacku i nie mówił, że znowu zapomniałam...)</i>\n\n",
-        "Weekend za pasem! Oto Twoje <b>rozgrzebane seriale</b> czekające na dokończenie:\n"
+        "🐟 <b>Dori: Piątkowy rozkład serialowy</b> 📺\n\n",
+        "Rozgrzebane seriale na ten weekend:\n\n"
     ]
 
     for s in series:
-        platform_txt = f" [{s.get('platform')}]" if s.get("platform") else ""
+        platform_txt = f" ({s.get('platform')})" if s.get("platform") else ""
         notes_txt = f" — <i>{s.get('notes')}</i>" if s.get("notes") else ""
         season = s.get("current_season", 1)
         episode = s.get("current_episode", 1)
-        msg_lines.append(f"🍿 <b>{s['title']}</b>: Sezon {season}, Odcinek {episode}{platform_txt}{notes_txt}\n")
+        msg_lines.append(f"• <b>{s['title']}</b>: Sezon {season}, Odcinek {episode}{platform_txt}{notes_txt}\n")
 
-    msg_lines.append(
-        "\nJak coś obejrzysz w weekend, rzuć mi na czat aktualizację, np.:\n"
-        "• <code>Skończyłem Silo s02e05</code>\n"
-        "• <code>Zaliczony cały sezon Severance!</code>\n"
-        "• <code>Dodaj serial: Pingwin s01e01</code>"
-    )
-
+    msg_lines.append("\nMiłego seansu! Jak coś obejrzysz lub zmienisz, po prostu mi napisz.")
     return "".join(msg_lines)
 
 
 def run_quick_add(text: str) -> bool:
     """
     Parses natural language from Ariel / Dori to automatically update state.
-    Examples:
-      - "film: Gladiator 2, ocena 8.5/10"
-      - "film: Incepcja 9/10"
-      - "serial: Silo s02e05 (Apple TV+)"
-      - "skończyłem serial Severance 9/10"
+    Handles both compact notation (S01E05) and natural Polish phrasing.
     """
     text_clean = text.strip()
 
-    # Check finished
-    if any(k in text_clean.lower() for k in ["skończyłem serial", "zaliczony serial", "obejrzany cały", "koniec serialu"]):
-        clean_title = re.sub(r"(?i)(skończyłem serial|zaliczony serial|obejrzany cały|koniec serialu|cały sezon)\s*", "", text_clean).strip("!.,: ")
+    # Check finished / dropped
+    if any(k in text_clean.lower() for k in ["skończyłem", "zaliczony", "obejrzany cały", "koniec serialu", "zakończyłem", "porzuciłem", "nie dla mnie"]):
+        clean_title = re.sub(r"(?i)(skończyłem serial|zaliczony serial|obejrzany cały|koniec serialu|cały sezon|zakończyłem na \d+ sezonie|zakończyłem|porzuciłem|nie dla mnie)\s*", "", text_clean).strip("!.,: ")
         rate_match = re.search(r"(?:ocena:?\s*|rating:?\s*)?(\d+(?:\.\d+)?\s*/\s*10|\b(?:10|[1-9])\b\s*$)", clean_title)
         rating = ""
         if rate_match:
@@ -269,14 +252,25 @@ def run_quick_add(text: str) -> bool:
             clean_title = clean_title[:rate_match.start()].strip(" ,-")
         return finish_series(clean_title, rating=rating)
 
-    # Check series pattern like s01e02 or season 1 episode 2
-    se_match = re.search(r"(?i)\bs(\d{1,2})e(\d{1,2})\b", text_clean)
-    if se_match:
-        s_num = int(se_match.group(1))
-        e_num = int(se_match.group(2))
-        raw_title = text_clean[:se_match.start()].strip()
-        raw_title = re.sub(r"(?i)^(dodaj serial|serial|zacząłem|oglądam|skończyłem)\s*[:\-]?\s*", "", raw_title).strip()
-        tail = text_clean[se_match.end():].strip(" ,-")
+    # Check series pattern: s01e02 or Polish "sezon X odcinek Y"
+    se_match = re.search(r"(?i)\bs(\d{1,2})\s*e(\d{1,2})\b", text_clean)
+    polish_se_match = re.search(r"(?i)(?:w\s*|na\s*)?(\d{1,2})\s*sezon(?:ie)?\s*(\d{1,2})\s*odcin(?:ku|ek)", text_clean)
+    
+    if se_match or polish_se_match:
+        if se_match:
+            s_num = int(se_match.group(1))
+            e_num = int(se_match.group(2))
+            raw_title = text_clean[:se_match.start()].strip()
+            tail = text_clean[se_match.end():].strip(" ,-")
+        else:
+            s_num = int(polish_se_match.group(1))
+            e_num = int(polish_se_match.group(2))
+            raw_title = text_clean[:polish_se_match.start()].strip()
+            tail = text_clean[polish_se_match.end():].strip(" ,-")
+
+        raw_title = re.sub(r"(?i)^(dodaj serial|serial|zacząłem|oglądam|jestem na)\s*[:\-]?\s*", "", raw_title).strip()
+        raw_title = re.sub(r"(?i)\s+oglądam\s*$", "", raw_title).strip()
+        
         platform = ""
         notes = ""
         plat_match = re.search(r"\(([^)]+)\)|\[([^\]]+)\]", tail)

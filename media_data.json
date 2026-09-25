@@ -1,47 +1,38 @@
 {
   "unfinished_series": [
     {
-      "id": "ser-severance",
-      "title": "Severance",
-      "current_season": 2,
-      "current_episode": 1,
-      "platform": "Apple TV+",
+      "id": "ser-mob-land",
+      "title": "Mob Land",
+      "current_season": 1,
+      "current_episode": 5,
+      "platform": "",
       "status": "watching",
-      "notes": "Czeka na weekend",
-      "updated_at": "2026-09-25T14:00:00"
+      "notes": "Ocena: 8/10",
+      "updated_at": "2026-09-25T17:15:00"
     },
     {
       "id": "ser-silo",
       "title": "Silo",
-      "current_season": 2,
-      "current_episode": 4,
+      "current_season": 1,
+      "current_episode": 9,
       "platform": "Apple TV+",
       "status": "watching",
-      "notes": "Dobre tempo",
-      "updated_at": "2026-09-25T14:00:00"
+      "notes": "Końcówka sezonu 1, czeka na sezon 2",
+      "updated_at": "2026-09-25T17:15:00"
     }
   ],
-  "watched_movies": [
-    {
-      "id": "mov-inception",
-      "title": "Inception",
-      "watched_date": "2026-09-20",
-      "rating": "9/10",
-      "comment": "Klasyk na wieczór",
-      "added_at": "2026-09-20T21:00:00"
-    }
-  ],
+  "watched_movies": [],
   "finished_series": [
     {
-      "id": "ser-ted-lasso",
-      "title": "Ted Lasso",
-      "finished_date": "2026-08-15",
-      "rating": "10/10",
-      "platform": "Apple TV+"
+      "id": "ser-severance",
+      "title": "Severance",
+      "finished_date": "2026-09-25",
+      "rating": "",
+      "notes": "Zakończono na 1. sezonie (porzucony, nie dla mnie)"
     }
   ],
   "metadata": {
-    "version": "1.0",
-    "description": "Zewnętrzna pamięć Dori do filmów i seriali (żeby nie uciekło z jej 3-sekundowego RAM-u)"
+    "version": "1.1",
+    "description": "Zewnętrzna pamięć Dori do filmów i seriali Ariela"
   }
 }
